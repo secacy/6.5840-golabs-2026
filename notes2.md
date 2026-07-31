@@ -52,3 +52,16 @@ $ cd src
 $ make RUN="-run Reliable" lock1
 ```
 
+
+Key/value server with dropped(丢失的) messages
+背景：网络可能会重新排序、延迟或丢失RPC请求或响应。客户端需要不断重新尝试每个 RPC 操作，直到收到服务器的响应为止。
+一个棘手的情况是，当服务器对 Clerk 重新尝试的 RPC 发送 rpc.ErrVersion 作为响应时。在这种情况下，Clerk 无法知道服务器的确执行了它的 Put 还是没有执行
+因此，如果 Clerk 收到关于重新传输的 Put RPC 的 rpc.ErrVersion ，那么 Clerk.Put 应该向应用程序返回 rpc.ErrMaybe 而不是 rpc.ErrVersion ，因为请求可能确实被执行了。接下来就由应用程序来处理这种情况了。
+如果服务器对第一次的 Put RPC 响应了 rpc.ErrVersion ，那么 Clerk 应该向应用程序返回 rpc.ErrVersion ，因为显然该 RPC 并没有被服务器执行。
+对于应用程序开发者来说，如果 Put 的操作能够做到一次性完成（即不会出现 rpc.ErrMaybe 错误），那就更方便了。不过，如果没有在服务器上为每个 Clerk 维护状态，那就很难保证这种效果。在本实验的最后一个环节中，你将使用 Clerk 来实现一个锁机制，从而了解如何以最多一次 Clerk.Put 的方式来进行编程。
+
+现在，您应该修改您的代码，以便在遇到 RPC 请求失败的情况下继续运行。
+当客户端从服务器的 ck.clnt.Call() 处收到 RPC 回复时，其返回值应为 true ；而当客户端没有收到任何回复时，返回值应为 false 。
+更准确地说，当客户端等待回复消息超过超时时间仍未收到回复时，系统会返回 false 值。
+您的 Clerk 应该持续发送 RPC 请求，直到收到回复为止。
+您的解决方案不需要对服务器进行任何修改。

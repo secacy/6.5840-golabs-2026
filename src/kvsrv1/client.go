@@ -1,8 +1,6 @@
 package kvsrv
 
 import (
-	"log"
-
 	"6.5840/kvsrv1/rpc"
 	"6.5840/kvtest1"
 	"6.5840/tester1"
@@ -34,9 +32,9 @@ func (ck *Clerk) Get(key string) (string, rpc.Tversion, rpc.Err) {
 	args := rpc.GetArgs{Key: key}
 	reply := rpc.GetReply{}
 	ok := ck.clnt.Call(ck.server, "KVServer.Get", &args, &reply)
-	if !ok {
-		log.Printf("call Get fail, reply = %v\n", reply)
-		return "", 0, rpc.ErrMaybe
+	for !ok {
+		// log.Println("[Get] fail to get response")
+		ok = ck.clnt.Call(ck.server, "KVServer.Get", &args, &reply)
 	}
 	if reply.Err == rpc.ErrNoKey {
 		return "", 0, rpc.ErrNoKey
@@ -66,13 +64,18 @@ func (ck *Clerk) Put(key, value string, version rpc.Tversion) rpc.Err {
 	args := rpc.PutArgs{Key: key, Value: value, Version: version}
 	reply := rpc.PutReply{}
 	ok := ck.clnt.Call(ck.server, "KVServer.Put", &args, &reply)
-	if !ok {
-		// rpc调用失败
-		log.Printf("call Put fail, reply = %v\n", reply)
-		return rpc.ErrMaybe
-	}
+	// 服务器对第一次的 Put RPC 响应了 rpc.ErrVersion
 	if reply.Err == rpc.ErrVersion {
 		return rpc.ErrVersion
+	}
+	// 后续可能服务器是第一次收到，也可能是非第一次收到
+	for !ok {
+		// rpc未收到响应
+		// log.Println("[Put] fail to get response")
+		ok = ck.clnt.Call(ck.server, "KVServer.Put", &args, &reply)
+	}
+	if reply.Err == rpc.ErrVersion {
+		return rpc.ErrMaybe
 	} else if reply.Err == rpc.ErrNoKey {
 		return rpc.ErrNoKey
 	}
