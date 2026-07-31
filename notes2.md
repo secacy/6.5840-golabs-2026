@@ -67,3 +67,8 @@ Key/value server with dropped(丢失的) messages
 您的解决方案不需要对服务器进行任何修改。
 
 hint: Before the client retries, 应该等待一段时间；你可以使用 Go 语言的 time 包，并调用 time.Sleep(100 * time.Millisecond) 函数。
+
+
+在不可靠网络环境下使用 KV 客户端实现锁：
+task: 修改你的锁实现，使其在网络不可靠的情况下仍能与修改后的键值客户端正确协作。
+思路：需要处理rpc.ErrMaybe错误

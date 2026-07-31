@@ -39,14 +39,15 @@ func (lk *Lock) Acquire() {
 	lk.clientId = kvtest.RandValue(8) // 这是客户端自己的clientId，记录在自己的锁变量中
 	// 进行put操作
 	err := lk.ck.Put(lk.lockName, lk.clientId, 0)
-	for err == rpc.ErrVersion {
+	for err == rpc.ErrVersion || err == rpc.ErrMaybe {
+		// 如果是maybe，可能没有成功获取到锁，需要验证锁的clientId是否是自己
 		// 锁被持有
 		// 尝试get锁
 		var rpcVersion rpc.Tversion
 		var cId string
 		for {
 			cId, rpcVersion, _ = lk.ck.Get(lk.lockName)
-			if cId == "" {
+			if cId == "" || cId == lk.clientId {
 				break
 			}
 		}
@@ -71,5 +72,10 @@ func (lk *Lock) Release() {
 	putErr := lk.ck.Put(lk.lockName, "", rpcVersion)
 	if putErr == rpc.ErrVersion {
 		log.Printf("lock %s fail to release", lk.lockName)
+	}
+	// 如果没有被释放，需要不断重试
+	for putErr == rpc.ErrMaybe {
+		// log.Printf("lock %s fail to release", lk.lockName)
+		putErr = lk.ck.Put(lk.lockName, "", rpcVersion)
 	}
 }
