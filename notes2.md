@@ -33,15 +33,16 @@ $ cd src
 $ make RUN="-run Reliable" kvsrv1
 ```
 
-Implementing a lock using key/value clerk:
+使用 K/V 客户端实现一个锁：
+知识：在许多分布式应用程序中，运行在不同机器上的客户端会使用键值服务器来协调它们的操作。例如，ZooKeeper 和 Etcd 允许客户端通过分布式锁来协作。ZooKeeper 和 Etcd 通过带有条件的 put 操作来实现这种锁机制。
 task: implement locks, using your key/value server to store whatever per-lock state your design needs.
-使用键值服务器来实现锁机制，以存储设计所需的所有锁相关状态信息。
-可以创建多个独立的锁，每个锁都有唯一的名称，这些名称作为参数传递给 MakeLock 。
+可以创建多个独立的锁，每个锁都有唯一的名称，这些名称作为参数传递给 `MakeLock` 。
 一个锁支持两种操作： Acquire 和 Release 。
 一次只有单个客户端可以成功获取某个锁；其他客户端必须等待，直到第一个客户端通过 Release 释放该锁为止。
 
 你需要修改 src/kvsrv1/lock/lock.go 代码。
 同时，你的 Acquire 和 Release 模块应通过调用 lk.ck.Put() 和 lk.ck.Get() 函数来分别存储每个锁的状态信息。
+Hint: 你需要为每个锁客户端提供一个唯一的标识符；可以使用 kvtest.RandValue(8) 来生成随机字符串。
 
 by the way, 如果客户端在持有锁的时候发生崩溃，那么锁将永远无法被释放。在比这个模型更复杂的设计中，客户端会为锁创建一个租约。当租约到期时，锁服务器会代表客户端释放锁。在这个模型中，客户端不会崩溃，因此这个问题可以被忽略不计。
 
