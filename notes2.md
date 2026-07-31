@@ -65,3 +65,5 @@ Key/value server with dropped(丢失的) messages
 更准确地说，当客户端等待回复消息超过超时时间仍未收到回复时，系统会返回 false 值。
 您的 Clerk 应该持续发送 RPC 请求，直到收到回复为止。
 您的解决方案不需要对服务器进行任何修改。
+
+hint: Before the client retries, 应该等待一段时间；你可以使用 Go 语言的 time 包，并调用 time.Sleep(100 * time.Millisecond) 函数。
