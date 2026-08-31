@@ -24,10 +24,16 @@ Raft 将客户端请求按顺序整理起来，形成一个日志序列，并确
 
 keys: 
 1. 请求投票不应该串行发送。网络可能存在分区收不到消息，可能等很久才失败，这时可能还没有执行到下一个，自己的选举超时时间就到了(前面的慢节点会阻塞后面的快节点) --> 请求投票应并行扇出
-2. 发起新一轮选举：不应该考虑是否投过票(votedFor只是当前任期的投票记录)，但是计时器超时时(说明没有更新)仍应该发起选举，如果要考虑给候选人投了票，成功投票这个事件应该重置 election timer
+2. 发起新一轮选举：不应该考虑是否投过票-votedFor只是当前任期的投票记录，但是计时器超时时(说明没有更新)仍应该发起选举。如果要考虑给其他候选人投了票，成功投票这个事件应该去重置选举超时计时器 我投过票只限制同一个 term 内还能不能再投给别人；它不限制未来因为超时进入下一个 term。
 
 debugs helpers:
 1. log
 2. 可视化文件(If you fail a test, the tester produces a file that visualizes a timeline with events marked along it, including network partitions, crashed servers, and checks performed. Here's an example of the visualization. )
 
+summary:
+什么时候需要重置计时器
+1. 发起新一轮选举
+2. 收到来自当前或更新任期的leader的RPC(说明leader没挂)
+3. 收到请求投票RPC并投出合法的票
 
+### Lab 3B: 日志

@@ -154,18 +154,14 @@ type RequestVoteReply struct {
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (3A, 3B).
 	// 如果 term < currentTerm，拒绝投票
-	// 若RPC请求或响应中的term T > currentTerm: 另currentTerm=T，并转换为follower
+	// 若RPC请求或响应中的term T > currentTerm: 令currentTerm=T，并转换为follower
 	// Q7: 如果是请求投票也是吗？但是如果自己已经是candidate了呢?
 	// 当前视为也是
 	rf.checkAndUpdateTerm(args.Term)
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	defer func() {
-		DPrintf("【请求投票处理】我是%d, 我的当前任期是%d, 请求的任期是%d, 我投给了%d, 请求的candidateId是%d, 请求投票结果是%v", rf.me, rf.currentTerm, args.Term, rf.votedFor, args.CandidateId, reply.VoteGranted)
-	}()
+	reply.Term = rf.currentTerm
 	if args.Term < rf.currentTerm {
-		// 拒绝投票
-		reply.Term = rf.currentTerm
 		return
 	}
 	// 如果尚未投票或已投给该candidate，且候选人的日志至少和自己一样新，则授予选票
@@ -182,6 +178,8 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		//}
 		// 接受
 		rf.votedFor = args.CandidateId
+		// Correct: 如果投出过票，重置计时器(防止刚投出票就计时器到期重新发起选举，打断被投票人的选举
+		rf.resetElectionTimer()
 		reply.VoteGranted = true
 	}
 	return
@@ -219,98 +217,44 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 //	return ok
 //}
 
-func (rf *Raft) sendRequestVoteChannel(server int, args *RequestVoteArgs, reply *RequestVoteReply, ch chan<- bool) {
+func (rf *Raft) sendRequestVoteChannel(server int, args *RequestVoteArgs, reply *RequestVoteReply, ch chan<- *RequestVoteReply) {
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
 	if ok {
-		// 若RPC请求或响应中的term T > currentTerm: 另currentTerm=T，并转换为follower
+		// 若RPC请求或响应中的term T > currentTerm: 令currentTerm=T，并转换为follower
 		rf.checkAndUpdateTerm(reply.Term)
 		if !rf.checkCandidate() {
 			return
 		}
-		ch <- reply.VoteGranted
+		ch <- reply
 	}
 }
-
-func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
-	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
-	if ok {
-		// 若RPC请求或响应中的term T > currentTerm: 另currentTerm=T，并转换为follower
-		rf.checkAndUpdateTerm(reply.Term)
-		if rf.checkCandidate() {
-			return reply.VoteGranted
-		}
-	}
-	return false
-}
-
-//func (rf *Raft) SendRequestVoteChannel() {
-//	args := make([]RequestVoteArgs, len(rf.peers))
-//	replies := make([]RequestVoteReply, len(rf.peers))
-//
-//	ch := make(chan bool)
-//	for i := range rf.peers {
-//		rf.mu.Lock()
-//		args[i] = RequestVoteArgs{
-//			Term:        rf.currentTerm,
-//			CandidateId: rf.me,
-//		}
-//		rf.mu.Unlock()
-//		go rf.sendRequestVoteChannel(i, &args[i], &replies[i], ch)
-//	}
-//
-//	// Q4: 如何发现收到多数票?
-//	// 通过协程进行通信，检查结果
-//	go func() {
-//		count := 0
-//		for range len(rf.peers) {
-//			if !rf.checkCandidate() {
-//				return
-//			}
-//			ok := <-ch
-//			if ok {
-//				count++
-//			}
-//			if count > len(rf.peers)/2 {
-//				// 收到多数票，成为leader
-//				rf.BecomeLeader()
-//				return
-//			}
-//		}
-//	}()
-//}
 
 func (rf *Raft) SendRequestVote(term int, candidateId int) {
-	args := make([]RequestVoteArgs, len(rf.peers))
-	replies := make([]RequestVoteReply, len(rf.peers))
-
-	ch := make(chan bool, len(rf.peers)-1)
+	ch := make(chan *RequestVoteReply, len(rf.peers)-1)
 	for i := range rf.peers {
 		// correct:不用给自己发RPC(防止票数被算两次)
 		if i == rf.me {
 			continue
 		}
-		rf.mu.Lock()
-		args[i] = RequestVoteArgs{
+		// Q7: 形成了分区怎么办? 没有接收到响应?
+		// 只要至少有一半以上的服务器处于活跃状态并且能够相互通信，Raft 就能继续运行。如果没有达到这一要求，Raft 会暂停当前操作，但一旦半数以上的服务器能够再次通信，它就会继续运行下去。
+		// Correct: 请求投票不应该串行发送，网络可能存在分区收不到消息，可能等很久才失败，这时可能没有执行到下一个，自己的选举超时时间就到了(前面的慢节点会阻塞后面的快节点) --> 请求投票应并行扇出
+		args := &RequestVoteArgs{
 			Term:        term,
 			CandidateId: candidateId,
 		}
-		rf.mu.Unlock()
-		// Q7: 形成了分区怎么办? 没有接收到响应?
-		// 只要至少有一半以上的服务器处于活跃状态并且能够相互通信，Raft 就能继续运行。如果没有达到这一要求，Raft 会暂停当前操作，但一旦半数以上的服务器能够再次通信，它就会继续运行下去。
-		// Correct: 请求投票不应该串行发送，网络可能存在分区收不到消息，可能等很久才失败，这时可能没有执行到下一个，自己的选举超时时间就到了(前面的慢节点会阻塞后面的快节点)
-		// --> 请求投票应并行扇出
-		go rf.sendRequestVoteChannel(i, &args[i], &replies[i], ch)
+		reply := &RequestVoteReply{}
+		go rf.sendRequestVoteChannel(i, args, reply, ch)
 	}
 
 	count := 1 // 我的Peers不包括我自己，所以count从1开始
 	for range len(rf.peers) - 1 {
+		voteReply := <-ch
 		if !rf.checkCandidate() {
 			return
 		}
-		granted := <-ch
-		if granted {
+		if voteReply.VoteGranted {
 			count++
-			DPrintf("我是%d, 当前任期是%d, 我收到了%d票", candidateId, term, count)
 		}
 		// Q8: 分区里的节点数是偶数怎么办?
 		// 只要至少有一半以上的服务器处于活跃状态并且能够相互通信，Raft 就能继续运行。如果没有达到这一要求，Raft 会暂停当前操作，但一旦半数以上的服务器能够再次通信，它就会继续运行下去。
@@ -327,10 +271,9 @@ func (rf *Raft) BecomeLeader() {
 	// Q5: 也许需要先检查是否因为收到新leader的AppendEntries而转为了follower？会出现这种情况吗？
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	if rf.currentState == follower {
+	if rf.currentState != candidate {
 		return
 	}
-	DPrintf("!!!!======我是%d, 我成为了领导者！！！=====!!!!", rf.me)
 	rf.currentState = leader
 	go rf.SendHeartbeat(rf.currentTerm, rf.me)
 }
@@ -447,14 +390,10 @@ func (rf *Raft) ticker() {
 
 		needElection := false
 		rf.mu.Lock()
-		// Correct: 不应该把投票状态与选举超时混为一谈，是否给候选人投过票应该通过重置计时器来考虑
-		// 论文里那句“without ... granting vote to candidate”，不是说“只要 votedFor != -1 就不能超时”，而是说"成功投票这个事件应该重置 election timer"。
-		// 也就是说，投票发生时应该把 deadline 往后推
+		// Correct: 不应该考虑是否投过票-votedFor只是当前任期的投票记录，但是计时器超时时(说明没有更新)仍应该发起选举。如果要考虑给其他候选人投了票，成功投票这个事件应该去重置选举超时计时器
 		// 我投过票只限制同一个 term 内还能不能再投给别人；它不限制未来因为超时进入下一个 term。
-		// votedFor 实际上只是当前 term 的投票记录。
 		if rf.currentState != leader && time.Now().After(rf.electionDeadline) {
 			needElection = true
-			DPrintf("我是%d, 当前任期是%d, 现在计时器超时了，我成为了候选人", rf.me, rf.currentTerm)
 		}
 		rf.mu.Unlock()
 
@@ -462,10 +401,8 @@ func (rf *Raft) ticker() {
 			rf.BecomeCandidate()
 		}
 
-		// pause for a random amount of time between 50 and 350
-		// milliseconds.
-		ms := 50 + (rand.Int63() % 300)
-		time.Sleep(time.Duration(ms) * time.Millisecond)
+		// 定期睡眠一会再检查
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
@@ -515,7 +452,6 @@ func (rf *Raft) checkAndUpdateTerm(term int) {
 	if term <= rf.currentTerm {
 		return
 	}
-	DPrintf("我是%d, 我原先的状态是%v, 我原先的任期是%d, 我将成为follower, 我之后的任期是%d", rf.me, rf.currentState, rf.currentTerm, term)
 	rf.currentTerm = term
 	rf.votedFor = -1
 	rf.currentState = follower
