@@ -58,7 +58,7 @@ notes:
 
 keys:
 1. AppendEntries可能重复或迟到(内容完全正确的)，但是需要保证follower复制日志具有幂等性。收到RPC reply时，发起这个RPC时的term(leader身份)可能过时
-2. 日志复制不应该是每个命令开一个协程(不是每个命令一个生命周期)，而是每个follower一条复制流。Raft 的 replication unit 并不是 command。command 是 log entry 的来源；真正的复制行为是： “根据 follower 当前的 nextIndex，把 Leader 从那个位置之后缺失的日志发过去。”
+2. 日志复制不应该是每个命令开一个协程(不是每个命令一个生命周期)，而是每个follower一条复制流。Raft 的 replication unit 并不是 command。command 是 log entry 的来源；而复制是根据 follower 当前的 nextIndex，把 Leader 从那个位置之后缺失的日志发过去。
    - 新command到来改变的是logs[]和lastLogIndex
    - AppendEntries允许一次RPC复制多条命令。
    - nextIndex[] / matchIndex[] 是 per-follower的，不是 per-command
@@ -66,7 +66,7 @@ keys:
 遇到的问题：
 1. 死锁等待。外层函数获取锁，内层函数也获取锁
 2. 对所有服务器，若 commitIndex > lastApplied：递增 lastApplied，并将`log[lastApplied]`应用到状态机。--> 是每个服务器都维护自己的状态机
-3. commitIndex的推进：一开始采用了基于channel通知的方式进行推进并针对性的计数，但是可能遇到a.成功事件数不代表服务器数 b.这个数比其他大，可以满足其他数的大多数条件，但是只看到这个数则会遗漏情况。修改后的 commit 推进逻辑：每次 matchIndex 变化后，从 lastLogIndex 往 commitIndex+1 找最大的合法 N
+3. commitIndex的推进：一开始采用了基于channel通知的方式进行推进并针对性的计数，但是可能遇到a.成功事件数不代表服务器数 b.这个数比其他大，可以满足其他数的大多数条件，但是只看到这个数则会遗漏情况。commit 推进逻辑：每次 matchIndex 变化后，从 lastLogIndex 往 commitIndex+1 找最大的合法 N
 
 Start(command)
 负责：

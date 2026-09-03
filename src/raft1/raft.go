@@ -10,7 +10,6 @@ package raft
 import (
 	//	"bytes"
 	"math/rand"
-	"slices"
 	"sync"
 	"time"
 
@@ -504,20 +503,6 @@ func (rf *Raft) findCommitIndexN(lastLogIndex int) int {
 		}
 	}
 	return -1
-}
-
-func (rf *Raft) majorityLowerBound() int {
-	values := slices.Clone(rf.matchIndex)
-	slices.Sort(values)
-
-	n := len(values)
-	count := n/2 + 1
-
-	index := n - count
-	for rf.logs[index].Term != rf.currentTerm && index >= 0 {
-		index--
-	}
-	return index
 }
 
 // 对所有服务器，若 commitIndex > lastApplied：递增 lastApplied，并将log[lastApplied]应用到状态机
